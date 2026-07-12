@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -45,6 +45,33 @@ public class goti : MonoBehaviour
     }
 
     /// <summary>
+    /// Check if this token belongs to the current player
+    /// BUG FIX 3: Prevent tokens from other players being clicked during their turn
+    /// </summary>
+    private bool IsCurrentPlayersTurn()
+    {
+        if (diceController == null)
+            return false;
+
+        // Get this goti's parent manager
+        Transform parent = transform.parent;
+        
+        // Check if parent matches the current player's manager
+        switch (diceController.current_turn)
+        {
+            case 0:
+                return bluegamemanager1.instance != null && parent == bluegamemanager1.instance.transform;
+            case 1:
+                return redgamemanager.instance != null && parent == redgamemanager.instance.transform;
+            case 2:
+                return yellowmanager.instance != null && parent == yellowmanager.instance.transform;
+            case 3:
+                return greenmanager.instance != null && parent == greenmanager.instance.transform;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Unlock goti if dice shows 1 or 6
     /// IMPROVEMENT: Added null safety checks
     /// </summary>
@@ -85,23 +112,62 @@ public class goti : MonoBehaviour
 
     public void OnMouseDown()
     {
-        // BUGFIX: Prevent multiple simultaneous movements
+        // BUG FIX 3: Check if it's current player's turn FIRST
+        // If it's not this player's turn, ignore the click completely
+        if (!IsCurrentPlayersTurn())
+            return;
+
+        // BUG FIX 5: Prevent multiple simultaneous movements
+        // Check early to block any additional clicks
         if (ismoving)
             return;
 
+        // BUG FIX 4 & 6: Check if token was already unlocked BEFORE this click
+        // This prevents unlock from consuming the movement action
+        bool wasAlreadyUnlocked = unlocked;
+
+        // Try to unlock if not yet unlocked
         if (!unlocked)
         {
             Unlock();
         }
 
-        // BUGFIX: Only move if unlocked AND not already moving
-        if (unlocked && !ismoving)
+        // BUG FIX 4: Only move if token was ALREADY unlocked
+        // If we just unlocked it this turn (wasAlreadyUnlocked = false),
+        // that action consumes the turn. The unlock uses the 1 or 6.
+        // Movement will happen on next turn.
+        // BUG FIX 5: Set ismoving IMMEDIATELY before starting coroutine
+        // This prevents race condition with double-click
+        if (unlocked && !ismoving && wasAlreadyUnlocked)
         {
+            // BUG FIX 5: Set flag immediately to block further clicks
+            ismoving = true;
+
             // BUGFIX: Stop any existing movement coroutine before starting new one
             if (currentMovementCoroutine != null)
                 StopCoroutine(currentMovementCoroutine);
 
             currentMovementCoroutine = StartCoroutine(Movement());
+        }
+        else if (!wasAlreadyUnlocked && unlocked)
+        {
+            // BUG FIX 4 & 6: Just unlocked a token without moving
+            // The unlock action is complete - reset state so player can roll again
+            // (or another player's turn if dice wasn't 6)
+            if (diceController != null)
+            {
+                // Reset waiting flag to allow dice to be enabled for next action
+                diceController.waitingForTokenMovement = false;
+                diceController.EnableDiceButton();
+                
+                // If this wasn't a 6, switch to next player
+                if (diceController.dice_count != 6)
+                {
+                    diceController.turnSwitchPending = true;
+                    StartCoroutine(diceController.DelayedTurnSwitch());
+                }
+                // If it WAS a 6, player keeps their turn for another roll
+            }
         }
     }
 
@@ -109,11 +175,10 @@ public class goti : MonoBehaviour
     /// Move goti along path by dice value
     /// IMPROVEMENT: Better movement calculation
     /// CRITICAL FIX: Movement-based turn switching only happens AFTER all movement is complete
-    /// BUGFIX BUG1: Movement completion is the ONLY place where Turn_Switch() should be called
     /// </summary>
     IEnumerator Movement()
     {
-        ismoving = true;
+        // ismoving is already set to true in OnMouseDown(), so this is already true
 
         // IMPROVEMENT: Null check for dice
         if (diceController == null)
@@ -157,22 +222,19 @@ public class goti : MonoBehaviour
         ismoving = false;
         currentMovementCoroutine = null;
 
-        // CRITICAL FIX BUG1 + BUG2: Turn switching only happens here, AFTER movement is fully complete
+        // CRITICAL FIX: Turn switching only happens here, AFTER movement is fully complete
         // This ensures turn does NOT switch until animation and state are fully reset
-        // The gate flag 'turnSwitchPending' ensures Turn_Switch() is called exactly once
         if (diceController != null)
         {
             if (diceController.dice_count != 6)
             {
-                // Not a 6: signal that turn should switch ONLY after this movement finishes
-                // Set the gate flag and call DelayedTurnSwitch which will respect the gate
+                // Not a 6: switch to next player ONLY after this movement finishes
                 diceController.turnSwitchPending = true;
                 StartCoroutine(diceController.DelayedTurnSwitch());
             }
             else
             {
                 // Rolled 6: enable dice button for extra turn, don't switch players
-                // Also reset the waiting flag so player can roll again immediately
                 diceController.waitingForTokenMovement = false;
                 diceController.EnableDiceButton();
             }
