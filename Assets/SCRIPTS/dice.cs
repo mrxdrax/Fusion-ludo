@@ -16,19 +16,14 @@ public class dice : MonoBehaviour
     public static dice instance;
     public int current_turn = 0;
     public bool waitingForTokenMovement = false;
-
-    // OPTIMIZATION: Cache Button component to avoid repeated GetComponent calls
     private Button diceButton;
     private bool isRolling = false;
-    
-    // BUGFIX BUG2: Gate flag to prevent duplicate Turn_Switch() calls
-    // PUBLIC so goti.cs can set it after movement completes
     public bool turnSwitchPending = false;
 
     public void Awake()
     {
         instance = this;
-        // IMPROVEMENT: Cache Button component on initialization
+        
         diceButton = transform.GetComponent<Button>();
         if (diceButton == null)
         {
